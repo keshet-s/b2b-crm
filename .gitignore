@@ -217,5 +217,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-#Data
-data/
+# Data directory — ignore DB and uploads, but keep the directory in git
+data/*
+!data/.gitkeep

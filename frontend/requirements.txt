@@ -1,0 +1,14 @@
+# UI framework
+streamlit==1.36.0
+
+# HTTP client (calls to FastAPI backend)
+httpx==0.27.0
+
+# Data manipulation & display
+pandas==2.2.2
+
+# Charts & visualisations
+plotly==5.22.0
+
+# Environment variable loading
+python-dotenv==1.0.1

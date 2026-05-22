@@ -1,0 +1,56 @@
+# Production overrides for EC2 deployment.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Prerequisites on the EC2 host:
+#   1. Copy .env.example → .env and fill in real values
+#   2. Set DOMAIN in .env (e.g. DOMAIN=crm.example.com)
+#   3. Ensure ports 80 and 443 are open in the security group
+
+version: "3.9"
+
+volumes:
+  caddy_data:   # persists TLS certificates across container restarts
+  caddy_config: # persists Caddy runtime config
+
+services:
+  backend:
+    # Source code is baked into the image; no bind-mount in production.
+    volumes:
+      - ./data:/data            # keep the SQLite DB on the host
+      - ./backend/prompts:/app/prompts:ro
+    restart: always
+    # Remove the --reload flag used in development
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    # Source code baked in; no bind-mount in production.
+    restart: always
+    command: >
+      streamlit run app.py
+      --server.port 8501
+      --server.address 0.0.0.0
+      --server.headless true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # TLS certificate storage (survives restarts)
+      - caddy_config:/config   # Caddy admin / runtime config
+    env_file:
+      - .env
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started

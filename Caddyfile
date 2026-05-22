@@ -1,0 +1,58 @@
+# Caddyfile — production reverse proxy for B2B CRM
+#
+# OPERATOR: set the DOMAIN environment variable before starting Caddy.
+#   In .env:  DOMAIN=crm.example.com
+#   Caddy reads it via the {$DOMAIN} placeholder below.
+#
+# Caddy automatically obtains and renews a Let's Encrypt TLS certificate
+# for the configured domain — no manual certificate management required.
+# Ensure ports 80 and 443 are reachable from the internet so ACME HTTP-01
+# challenge can complete on first startup.
+
+{$DOMAIN} {
+    # ----------------------------------------------------------------
+    # API — forward requests under /api/* to the FastAPI backend
+    # The /api prefix is stripped before forwarding (handle_path).
+    # ----------------------------------------------------------------
+    handle_path /api/* {
+        reverse_proxy backend:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # ----------------------------------------------------------------
+    # Frontend — all other requests go to the Streamlit app
+    # ----------------------------------------------------------------
+    handle {
+        reverse_proxy frontend:8501 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            # Streamlit uses WebSockets for live updates
+            header_up Connection {>Connection}
+            header_up Upgrade {>Upgrade}
+        }
+    }
+
+    # Compress responses for faster page loads
+    encode gzip
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Access log (written to stdout, captured by Docker)
+    log {
+        output stdout
+        format console
+    }
+}
