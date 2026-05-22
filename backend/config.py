@@ -1,7 +1,54 @@
-from typing import Annotated
+import json
+from typing import Any, Type, Union, get_args, get_origin
 
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSource, SettingsConfigDict
+
+
+def _is_list_annotation(annotation: Any) -> bool:
+    """Return True if the annotation is list[...] or Optional[list[...]]."""
+    if annotation is None:
+        return False
+    origin = get_origin(annotation)
+    if origin is list:
+        return True
+    # Optional[list[X]] == Union[list[X], None]
+    if origin is Union:
+        return any(get_origin(a) is list for a in get_args(annotation))
+    return False
+
+
+class _CsvMixin:
+    """Allow comma-separated strings as well as JSON arrays for list[str] settings.
+
+    pydantic-settings calls prepare_field_value() *before* any pydantic
+    validator can run.  In older releases (≤2.3) it gates on value_is_complex;
+    in newer releases (≥2.6) that flag is always False and the method calls
+    decode_complex_value unconditionally.  Checking the field annotation
+    directly is version-agnostic.
+    """
+
+    def prepare_field_value(
+        self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool = False
+    ) -> Any:
+        if isinstance(value, str) and _is_list_annotation(getattr(field, "annotation", None)):
+            v = value.strip()
+            if not v:
+                return None  # triggers the field's default ([])
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                # Accept comma-separated strings: "VP of Engineering,CTO"
+                return [item.strip() for item in v.split(",") if item.strip()]
+        return super().prepare_field_value(field_name, field, value, value_is_complex)  # type: ignore[safe-super]
+
+
+class _CsvEnvSource(_CsvMixin, EnvSettingsSource):
+    """OS environment variables with CSV-list support."""
+
+
+class _CsvDotEnvSource(_CsvMixin, DotEnvSettingsSource):
+    """Dotenv file with CSV-list support (used when running outside Docker)."""
 
 
 class Settings(BaseSettings):
@@ -25,7 +72,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production"
 
     # --- ICP (Ideal Customer Profile) filters ---
-    # Provide as comma-separated strings in the environment, e.g.:
+    # Accepts either a JSON array or a comma-separated string, e.g.:
     #   ICP_TITLES=VP of Engineering,Head of Engineering,CTO
     ICP_TITLES: list[str] = []
     ICP_LOCATIONS: list[str] = []
@@ -40,14 +87,20 @@ class Settings(BaseSettings):
     # --- Prompt files ---
     PROMPT_PATH: str = "/app/prompts/icp_v1.md"
 
-    @field_validator("ICP_TITLES", "ICP_LOCATIONS", "ICP_INDUSTRIES", mode="before")
     @classmethod
-    def _parse_comma_separated(cls, v: str | list) -> list[str]:
-        if isinstance(v, list):
-            return [str(item).strip() for item in v if str(item).strip()]
-        if isinstance(v, str):
-            return [item.strip() for item in v.split(",") if item.strip()]
-        return []
+    def settings_customise_sources(
+        cls,
+        settings_cls: Type["Settings"],
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        **kwargs,  # 'secrets_dir' (<2.3) or 'file_secret_settings' (≥2.3)
+    ) -> tuple:
+        secrets = next(iter(kwargs.values()), None)
+        sources: list = [init_settings, _CsvEnvSource(settings_cls), _CsvDotEnvSource(settings_cls)]
+        if secrets is not None:
+            sources.append(secrets)
+        return tuple(sources)
 
 
 settings = Settings()

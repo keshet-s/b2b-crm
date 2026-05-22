@@ -11,7 +11,6 @@ from sqlalchemy import (
     event,
     text,
 )
-from sqlalchemy.engine import Engine
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -38,11 +37,10 @@ engine = create_engine(
     connect_args=_connect_args,
 )
 
-
-@event.listens_for(Engine, "connect")
-def _set_sqlite_pragma(dbapi_conn, _connection_record):
-    """Enable WAL mode for better concurrent read performance on SQLite."""
-    if settings.DATABASE_URL.startswith("sqlite"):
+if settings.DATABASE_URL.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_conn, _connection_record):
+        """Enable WAL mode for better concurrent read performance on SQLite."""
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.close()
