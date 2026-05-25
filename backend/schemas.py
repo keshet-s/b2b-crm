@@ -119,6 +119,7 @@ class LeadResponse(LeadCreate):
 
     company: Optional[CompanyResponse] = None
     activities: list[ActivityResponse] = []
+    activity_count: int = 0
 
 
 # ---------------------------------------------------------------------------
