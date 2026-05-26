@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+import scheduler
 from config import settings
 from database import Activity, Lead, SourcingRun, get_db, init_db
 from routers import activities, companies, leads, scoring, sourcing
@@ -67,8 +68,14 @@ async def _log_requests(request: Request, call_next):
 @app.on_event("startup")
 def _startup():
     init_db()
+    scheduler.start()
     db_path = settings.DATABASE_URL.replace("sqlite:////", "/")
     logger.info("B2B CRM API v1.0.0 started — DB: %s", db_path)
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    scheduler.shutdown()
 
 # ---------------------------------------------------------------------------
 # Routers
@@ -92,6 +99,28 @@ def health(db: Session = Depends(get_db)):
         "timestamp": datetime.utcnow().isoformat(),
         "db": "connected",
     }
+
+# ---------------------------------------------------------------------------
+# Scheduler endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/scheduler/jobs", tags=["scheduler"])
+def list_scheduler_jobs():
+    """Return all registered background jobs with their next run times."""
+    return {"jobs": scheduler.get_jobs_info()}
+
+
+@app.post("/api/scheduler/trigger/{job_id}", tags=["scheduler"])
+def trigger_scheduler_job(job_id: str):
+    """Manually trigger a scheduled job by its ID (runs in background thread)."""
+    from fastapi import HTTPException
+    if not scheduler.trigger_job(job_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown job '{job_id}'. Valid IDs: {list(scheduler._JOB_MAP.keys())}",
+        )
+    return {"triggered": job_id, "status": "running"}
+
 
 # ---------------------------------------------------------------------------
 # Pipeline stats
