@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Optional
 
 import anthropic
@@ -41,15 +42,33 @@ _COST_INPUT_PER_1K = 0.001
 _COST_OUTPUT_PER_1K = 0.005
 
 
-def _strip_code_fences(text: str) -> str:
-    """Remove markdown code fences that Claude sometimes wraps JSON in."""
+def _extract_json(text: str) -> str:
+    """
+    Extract a JSON object from a Claude response that may be wrapped
+    in markdown code fences, have trailing text, or other formatting.
+    Tries three strategies in order:
+    1. Regex extract the outermost {...} object directly (most robust)
+    2. Strip code fences manually and return inner content
+    3. Return the stripped text as-is and let json.loads report the error
+    """
     text = text.strip()
-    # Remove ```json ... ``` or ``` ... ```
+
+    # Strategy 1: extract outermost JSON object via regex
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        return match.group(0).strip()
+
+    # Strategy 2: strip code fences
     if text.startswith("```"):
-        # Remove the opening fence (```json or just ```)
-        text = text[text.index("\n") + 1:] if "\n" in text else text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1:]
+        else:
+            text = text[3:]
+    # strip closing fence — handle trailing newline/space before ```
+    text = re.sub(r'\s*```\s*$', '', text)
+
+    # Strategy 3: return whatever we have
     return text.strip()
 
 
@@ -111,12 +130,17 @@ async def score_lead(lead_data: dict) -> ICPScoreResult:
     raw = response.content[0].text
     _log_usage(settings.ANTHROPIC_MODEL_SCORING, response.usage)
 
+    cleaned = _extract_json(raw)
+    logger.debug("score_lead extracted JSON (first 300 chars): %s", cleaned[:300])
     try:
-        cleaned = _strip_code_fences(raw)
-        logger.debug("score_lead cleaned response (first 200 chars): %s", cleaned[:200])
         return ICPScoreResult(**json.loads(cleaned))
-    except (json.JSONDecodeError, ValueError, Exception):
-        logger.warning("score_lead: non-JSON response on first attempt, retrying. Raw: %.300s", raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(
+            "score_lead: non-JSON response on first attempt, retrying. "
+            "Extraction result: %.200r | Error: %s",
+            cleaned,
+            e,
+        )
 
     retry_message = (
         user_message
@@ -126,10 +150,17 @@ async def score_lead(lead_data: dict) -> ICPScoreResult:
     raw2 = response2.content[0].text
     _log_usage(settings.ANTHROPIC_MODEL_SCORING, response2.usage)
 
+    cleaned2 = _extract_json(raw2)
+    logger.debug("score_lead retry extracted JSON (first 300 chars): %s", cleaned2[:300])
     try:
-        return ICPScoreResult(**json.loads(_strip_code_fences(raw2)))
-    except (json.JSONDecodeError, ValueError, Exception):
-        logger.error("score_lead: second attempt also non-JSON. Returning fallback. Raw: %.300s", raw2)
+        return ICPScoreResult(**json.loads(cleaned2))
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(
+            "score_lead: second attempt also non-JSON. Returning fallback. "
+            "Extraction result: %.200r | Error: %s",
+            cleaned2,
+            e,
+        )
         return _FALLBACK_RESULT
 
 
