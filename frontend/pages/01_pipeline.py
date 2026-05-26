@@ -272,6 +272,33 @@ st.markdown(
     + (f"  ·  {server_total} on server (scroll filters or increase limit)" if server_total > len(leads) else "")
 )
 
+with st.expander("Tier legend", expanded=False):
+    _tc1, _tc2, _tc3, _tc4 = st.columns(4)
+    _tc1.markdown(
+        "<span style='background:#d4edda;color:#155724;font-weight:700;"
+        "padding:3px 10px;border-radius:6px;'>A</span>"
+        "&nbsp; **80–100** · Outreach now",
+        unsafe_allow_html=True,
+    )
+    _tc2.markdown(
+        "<span style='background:#cce5ff;color:#004085;font-weight:700;"
+        "padding:3px 10px;border-radius:6px;'>B</span>"
+        "&nbsp; **60–79** · Nurture",
+        unsafe_allow_html=True,
+    )
+    _tc3.markdown(
+        "<span style='background:#fff3cd;color:#856404;font-weight:700;"
+        "padding:3px 10px;border-radius:6px;'>C</span>"
+        "&nbsp; **40–59** · Hold 90 days",
+        unsafe_allow_html=True,
+    )
+    _tc4.markdown(
+        "<span style='background:#f8d7da;color:#721c24;font-weight:700;"
+        "padding:3px 10px;border-radius:6px;'>D</span>"
+        "&nbsp; **0–39** · Disqualify",
+        unsafe_allow_html=True,
+    )
+
 # ── Build display DataFrame ───────────────────────────────────────────────────
 
 rows: list[dict] = []

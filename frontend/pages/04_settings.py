@@ -417,6 +417,48 @@ with cfg_right:
     else:
         st.info("Prompt file is empty or could not be read.")
 
+# ── ICP Tier Reference ────────────────────────────────────────────────────────
+
+st.markdown("---")
+st.subheader("ICP Tier Reference")
+st.caption(
+    "Tiers are assigned by Claude after scoring each lead 0–100 against the ICP "
+    "definition above. The tier drives the recommended next action."
+)
+
+_TIER_ROWS = [
+    ("A", "80 – 100", "#155724", "#d4edda",
+     "Immediate personal outreach within 24 hours.",
+     "Strong ICP fit, decision-maker role, active buying signal."),
+    ("B", "60 – 79", "#004085", "#cce5ff",
+     "Automated nurture sequence + manual review weekly.",
+     "Good fit but missing a buying signal or one dimension is weak."),
+    ("C", "40 – 59", "#856404", "#fff3cd",
+     "Hold; re-evaluate in 90 days.",
+     "Partial fit — wrong size, adjacent industry, or influencer role."),
+    ("D", "0 – 39",  "#721c24", "#f8d7da",
+     "Disqualify and archive.",
+     "Hard disqualifier triggered, or too little data to qualify."),
+]
+
+for tier, score_range, fg, bg, action, description in _TIER_ROWS:
+    t_col, s_col, a_col, d_col = st.columns([0.4, 0.7, 2, 3])
+    t_col.markdown(
+        f"<span style='background:{bg};color:{fg};font-weight:700;"
+        f"padding:3px 10px;border-radius:6px;font-size:1.05rem;'>{tier}</span>",
+        unsafe_allow_html=True,
+    )
+    s_col.markdown(f"**{score_range}**")
+    a_col.markdown(action)
+    d_col.markdown(f"<span style='color:#6c757d;font-size:0.9rem;'>{description}</span>",
+                   unsafe_allow_html=True)
+
+st.caption(
+    "Scoring rubric dimensions: Industry fit (25 pts) · Company size & stage (20 pts) · "
+    "Role seniority & relevance (25 pts) · Active buying signals (20 pts) · "
+    "Data completeness & reachability (10 pts)"
+)
+
 # ════════════════════════════════════════════════════════════════════════════
 # SECTION 3: Pipeline Stage Reference
 # ════════════════════════════════════════════════════════════════════════════
