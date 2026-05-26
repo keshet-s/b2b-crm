@@ -41,6 +41,18 @@ _COST_INPUT_PER_1K = 0.001
 _COST_OUTPUT_PER_1K = 0.005
 
 
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences that Claude sometimes wraps JSON in."""
+    text = text.strip()
+    # Remove ```json ... ``` or ``` ... ```
+    if text.startswith("```"):
+        # Remove the opening fence (```json or just ```)
+        text = text[text.index("\n") + 1:] if "\n" in text else text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
 def _log_usage(model: str, usage: anthropic.types.Usage) -> None:
     cost = (usage.input_tokens / 1000 * _COST_INPUT_PER_1K) + (
         usage.output_tokens / 1000 * _COST_OUTPUT_PER_1K
@@ -100,7 +112,7 @@ async def score_lead(lead_data: dict) -> ICPScoreResult:
     _log_usage(settings.ANTHROPIC_MODEL_SCORING, response.usage)
 
     try:
-        return ICPScoreResult(**json.loads(raw))
+        return ICPScoreResult(**json.loads(_strip_code_fences(raw)))
     except (json.JSONDecodeError, ValueError, Exception):
         logger.warning("score_lead: non-JSON response on first attempt, retrying. Raw: %.300s", raw)
 
@@ -113,7 +125,7 @@ async def score_lead(lead_data: dict) -> ICPScoreResult:
     _log_usage(settings.ANTHROPIC_MODEL_SCORING, response2.usage)
 
     try:
-        return ICPScoreResult(**json.loads(raw2))
+        return ICPScoreResult(**json.loads(_strip_code_fences(raw2)))
     except (json.JSONDecodeError, ValueError, Exception):
         logger.error("score_lead: second attempt also non-JSON. Returning fallback. Raw: %.300s", raw2)
         return _FALLBACK_RESULT
