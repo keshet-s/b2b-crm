@@ -102,7 +102,7 @@ async def score_lead(lead_data: dict) -> ICPScoreResult:
     def _call(messages: list) -> anthropic.types.Message:
         return client.messages.create(
             model=settings.ANTHROPIC_MODEL_SCORING,
-            max_tokens=512,
+            max_tokens=1024,
             system=_icp_prompt,
             messages=messages,
         )
@@ -112,7 +112,9 @@ async def score_lead(lead_data: dict) -> ICPScoreResult:
     _log_usage(settings.ANTHROPIC_MODEL_SCORING, response.usage)
 
     try:
-        return ICPScoreResult(**json.loads(_strip_code_fences(raw)))
+        cleaned = _strip_code_fences(raw)
+        logger.debug("score_lead cleaned response (first 200 chars): %s", cleaned[:200])
+        return ICPScoreResult(**json.loads(cleaned))
     except (json.JSONDecodeError, ValueError, Exception):
         logger.warning("score_lead: non-JSON response on first attempt, retrying. Raw: %.300s", raw)
 
