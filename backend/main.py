@@ -1,6 +1,7 @@
 import logging
+import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,3 +125,74 @@ def pipeline_stats(db: Session = Depends(get_db)):
         counts_by_tier=counts_by_tier,
         recent_activity_count=recent_activity_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# Settings endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/settings/icp-prompt", tags=["settings"])
+def icp_prompt():
+    """Read and return the ICP scoring prompt file."""
+    path = settings.PROMPT_PATH
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"content": content, "path": path}
+    except FileNotFoundError:
+        return {"content": "", "path": path, "error": f"File not found: {path}"}
+    except Exception as exc:
+        return {"content": "", "path": path, "error": str(exc)}
+
+
+@app.get("/api/settings/icp-config", tags=["settings"])
+def icp_config():
+    """Return current ICP configuration (no API keys)."""
+    return {
+        "ICP_TITLES":               settings.ICP_TITLES,
+        "ICP_LOCATIONS":            settings.ICP_LOCATIONS,
+        "ICP_INDUSTRIES":           settings.ICP_INDUSTRIES,
+        "ICP_EMPLOYEE_MIN":         settings.ICP_EMPLOYEE_MIN,
+        "ICP_EMPLOYEE_MAX":         settings.ICP_EMPLOYEE_MAX,
+        "ANTHROPIC_MODEL_SCORING":  settings.ANTHROPIC_MODEL_SCORING,
+        "ANTHROPIC_MODEL_WRITING":  settings.ANTHROPIC_MODEL_WRITING,
+    }
+
+
+@app.get("/api/settings/data-health", tags=["settings"])
+def data_health(db: Session = Depends(get_db)):
+    """Return data quality and coverage statistics."""
+    stale_cutoff = datetime.utcnow() - timedelta(days=30)
+
+    total       = db.scalar(select(func.count(Lead.id))) or 0
+    with_email  = db.scalar(select(func.count(Lead.id)).where(Lead.email.is_not(None))) or 0
+    verified    = db.scalar(select(func.count(Lead.id)).where(Lead.email_verified == True)) or 0  # noqa: E712
+    scored      = db.scalar(select(func.count(Lead.id)).where(Lead.scored_at.is_not(None))) or 0
+    with_hook   = db.scalar(select(func.count(Lead.id)).where(Lead.personalized_hook.is_not(None))) or 0
+    stale       = db.scalar(select(func.count(Lead.id)).where(Lead.updated_at < stale_cutoff)) or 0
+
+    db_path       = settings.DATABASE_URL.replace("sqlite:////", "/")
+    db_size_bytes = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+
+    return {
+        "total":         total,
+        "with_email":    with_email,
+        "without_email": total - with_email,
+        "verified_email": verified,
+        "scored":        scored,
+        "unscored":      total - scored,
+        "with_hook":     with_hook,
+        "stale_30d":     stale,
+        "db_size_bytes": db_size_bytes,
+    }
+
+
+@app.get("/api/settings/api-status", tags=["settings"])
+def api_key_status():
+    """Return which API keys/webhooks are configured (not the values)."""
+    return {
+        "apollo":    bool(settings.APOLLO_API_KEY),
+        "anthropic": bool(settings.ANTHROPIC_API_KEY),
+        "hunter":    bool(settings.HUNTER_API_KEY),
+        "slack":     bool(settings.SLACK_WEBHOOK_URL),
+    }
