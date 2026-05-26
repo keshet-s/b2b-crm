@@ -159,8 +159,19 @@ def get_sourcing_runs(limit: int = 10) -> list:
     return result
 
 
-def get_apollo_usage() -> dict:
+def get_sourcing_usage() -> dict:
+    """Return merged provider + Hunter usage stats from GET /api/sourcing/usage."""
     return _get("/api/sourcing/usage")
+
+
+def get_apollo_usage() -> dict:
+    """Backward-compat alias for get_sourcing_usage()."""
+    return get_sourcing_usage()
+
+
+def get_provider_info() -> dict:
+    """Return active provider config and switching instructions."""
+    return _get("/api/sourcing/provider-info")
 
 
 def enrich_tier_a() -> dict:

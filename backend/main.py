@@ -224,4 +224,5 @@ def api_key_status():
         "anthropic": bool(settings.ANTHROPIC_API_KEY),
         "hunter":    bool(settings.HUNTER_API_KEY),
         "slack":     bool(settings.SLACK_WEBHOOK_URL),
+        "pdl":       bool(settings.PDL_API_KEY),
     }

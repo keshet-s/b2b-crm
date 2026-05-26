@@ -58,7 +58,8 @@ _COST_PER_LEAD_USD = 0.003   # from claude_client.get_scoring_cost_estimate
 
 ss = st.session_state
 for _k, _v in [
-    ("cfg_apollo_status",    None),   # result of last Apollo test
+    ("cfg_provider_usage",   None),   # result of last active-provider usage test
+    ("cfg_apollo_status",    None),   # result of last Apollo-specific test
     ("cfg_anthropic_status", None),   # result of last Anthropic test
 ]:
     if _k not in ss:
@@ -132,6 +133,12 @@ STAGE_DEFS = [
 # ── Cached loaders ─────────────────────────────────────────────────────────────
 
 
+@st.cache_data(ttl=30)
+def _get_provider_info() -> dict:
+    result = api.get_provider_info()
+    return result if "error" not in result else {}
+
+
 @st.cache_data(ttl=60)
 def _get_stats() -> dict:
     return api.get_stats()
@@ -201,35 +208,88 @@ def _cfg_badge(configured: bool) -> str:
     return _CONFIGURED if configured else _MISSING
 
 
+# ── Active provider banner ────────────────────────────────────────────────────
+
+provider_info = _get_provider_info()
+if provider_info:
+    active_provider = provider_info.get("active_provider", "unknown")
+    _badge_color = {"pdl": "#d1fae5", "apollo": "#dbeafe"}.get(active_provider, "#f3f4f6")
+    _pdl_dot    = "🟢" if provider_info.get("pdl_configured")    else "🔴"
+    _apollo_dot = "🟢" if provider_info.get("apollo_configured") else "🔴"
+    _hunter_dot = "🟢" if provider_info.get("hunter_configured") else "🔴"
+    st.markdown(
+        f"""<div style="background:{_badge_color};border:1px solid #d1d5db;
+        border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:0.95rem;">
+        <strong>Active lead provider: <code>{active_provider.upper()}</code></strong>
+        &ensp;·&ensp; PDL {_pdl_dot} &ensp;·&ensp; Apollo {_apollo_dot}
+        &ensp;·&ensp; Hunter {_hunter_dot}
+        </div>""",
+        unsafe_allow_html=True,
+    )
+else:
+    st.warning("Could not load provider config from backend.", icon="⚠️")
+    active_provider = "unknown"
+
 api_c1, api_c2 = st.columns(2)
 
-# ── Apollo ────────────────────────────────────────────────────────────────────
+# ── Lead Providers (PDL + Apollo) ─────────────────────────────────────────────
 
 with api_c1:
     with st.container():
-        st.markdown("#### 🔭 Apollo.io")
+        st.markdown("#### 🔌 Lead Providers")
+
+        # PDL row
+        pdl_cfg    = key_status.get("pdl",    False) if keys_ok else False
+        apollo_cfg = key_status.get("apollo", False) if keys_ok else False
+
+        _pdl_active    = active_provider == "pdl"
+        _apollo_active = active_provider == "apollo"
+
+        st.markdown(
+            f"**PeopleDataLabs (PDL)** {'&nbsp;🟢 *active*' if _pdl_active else ''}"
+        )
         if keys_ok:
-            apollo_cfg = key_status.get("apollo", False)
-            st.markdown(f"**Config status:** {_cfg_badge(apollo_cfg)}")
+            st.markdown(f"&nbsp;&nbsp;&nbsp;Config status: {_cfg_badge(pdl_cfg)}")
+            if not pdl_cfg:
+                st.caption("Set `PDL_API_KEY` in `.env` to enable.")
         else:
             st.warning("Could not reach backend to check key status.")
-            apollo_cfg = False
 
-        if st.button("Test Apollo Connection", use_container_width=True, key="test_apollo"):
-            with st.spinner("Testing Apollo API…"):
-                result = api.get_apollo_usage()
-            if "error" in result:
-                st.error(f"❌ {result['error']}")
-                ss.cfg_apollo_status = ("error", result["error"])
-            else:
-                st.success("✅ Apollo reachable")
-                ss.cfg_apollo_status = ("ok", result)
+        st.markdown(
+            f"**Apollo.io** {'&nbsp;🟢 *active*' if _apollo_active else ''}"
+        )
+        if keys_ok:
+            st.markdown(f"&nbsp;&nbsp;&nbsp;Config status: {_cfg_badge(apollo_cfg)}")
+            if not apollo_cfg:
+                st.caption("Set `APOLLO_API_KEY` in `.env` to enable.")
 
-        if ss.cfg_apollo_status:
-            st_val, data = ss.cfg_apollo_status
-            if st_val == "ok" and isinstance(data, dict):
+        if active_provider != "unknown":
+            btn_label = f"Test {active_provider.upper()} + Hunter Usage"
+            if st.button(btn_label, use_container_width=True, key="test_provider"):
+                with st.spinner(f"Fetching {active_provider.upper()} usage stats…"):
+                    result = api.get_sourcing_usage()
+                if "error" in result:
+                    st.error(f"❌ {result['error']}")
+                    ss.cfg_provider_usage = ("error", result["error"])
+                else:
+                    st.success(f"✅ {active_provider.upper()} reachable")
+                    ss.cfg_provider_usage = ("ok", result)
+
+        if ss.cfg_provider_usage:
+            _pv_state, _pv_data = ss.cfg_provider_usage
+            if _pv_state == "ok" and isinstance(_pv_data, dict):
                 with st.expander("Usage details"):
-                    st.json(data)
+                    st.json(_pv_data)
+
+        if provider_info:
+            with st.expander("How to switch providers"):
+                st.code(
+                    provider_info.get(
+                        "switching_instructions",
+                        "Set ACTIVE_LEAD_PROVIDER=apollo (or pdl) in .env, "
+                        "then: docker compose restart backend",
+                    )
+                )
 
 # ── Anthropic ─────────────────────────────────────────────────────────────────
 
@@ -356,6 +416,48 @@ with cfg_right:
         st.caption(f"{line_count} lines · {char_count:,} characters")
     else:
         st.info("Prompt file is empty or could not be read.")
+
+# ── ICP Tier Reference ────────────────────────────────────────────────────────
+
+st.markdown("---")
+st.subheader("ICP Tier Reference")
+st.caption(
+    "Tiers are assigned by Claude after scoring each lead 0–100 against the ICP "
+    "definition above. The tier drives the recommended next action."
+)
+
+_TIER_ROWS = [
+    ("A", "80 – 100", "#155724", "#d4edda",
+     "Immediate personal outreach within 24 hours.",
+     "Strong ICP fit, decision-maker role, active buying signal."),
+    ("B", "60 – 79", "#004085", "#cce5ff",
+     "Automated nurture sequence + manual review weekly.",
+     "Good fit but missing a buying signal or one dimension is weak."),
+    ("C", "40 – 59", "#856404", "#fff3cd",
+     "Hold; re-evaluate in 90 days.",
+     "Partial fit — wrong size, adjacent industry, or influencer role."),
+    ("D", "0 – 39",  "#721c24", "#f8d7da",
+     "Disqualify and archive.",
+     "Hard disqualifier triggered, or too little data to qualify."),
+]
+
+for tier, score_range, fg, bg, action, description in _TIER_ROWS:
+    t_col, s_col, a_col, d_col = st.columns([0.4, 0.7, 2, 3])
+    t_col.markdown(
+        f"<span style='background:{bg};color:{fg};font-weight:700;"
+        f"padding:3px 10px;border-radius:6px;font-size:1.05rem;'>{tier}</span>",
+        unsafe_allow_html=True,
+    )
+    s_col.markdown(f"**{score_range}**")
+    a_col.markdown(action)
+    d_col.markdown(f"<span style='color:#6c757d;font-size:0.9rem;'>{description}</span>",
+                   unsafe_allow_html=True)
+
+st.caption(
+    "Scoring rubric dimensions: Industry fit (25 pts) · Company size & stage (20 pts) · "
+    "Role seniority & relevance (25 pts) · Active buying signals (20 pts) · "
+    "Data completeness & reachability (10 pts)"
+)
 
 # ════════════════════════════════════════════════════════════════════════════
 # SECTION 3: Pipeline Stage Reference
