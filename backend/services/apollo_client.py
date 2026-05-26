@@ -285,3 +285,81 @@ def parse_apollo_person(raw_person: dict, raw_org: dict | None = None) -> dict:
         "phone": phone,
         "company": company,
     }
+
+
+# ---------------------------------------------------------------------------
+# LeadProvider implementation
+# ---------------------------------------------------------------------------
+
+class ApolloProvider:
+    """Wraps the module-level Apollo functions to satisfy the LeadProvider interface."""
+
+    async def search_people(
+        self,
+        titles: list[str],
+        locations: list[str],
+        employee_min: int,
+        employee_max: int,
+        page: int = 1,
+        per_page: int = 25,
+    ) -> list[dict]:
+        query_params = build_icp_search_params(
+            titles=titles,
+            locations=locations,
+            employee_min=employee_min,
+            employee_max=employee_max,
+            page=page,
+        )
+        response = await search_people(query_params, page=page, per_page=per_page)
+        raw_people = response.get("people") or []
+        results = []
+        for raw_person in raw_people:
+            parsed = parse_apollo_person(raw_person)
+            company = parsed.pop("company", {})
+            lead = {
+                "provider_id": parsed.pop("apollo_id", None),
+                **parsed,
+                "source": "apollo",
+                "company": {
+                    "provider_id": company.get("apollo_id"),
+                    "name": company.get("name"),
+                    "domain": company.get("domain"),
+                    "industry": company.get("industry"),
+                    "employee_count": company.get("employee_count"),
+                    "hq_country": company.get("hq_country"),
+                    "funding_stage": None,
+                    "linkedin_url": company.get("linkedin_url"),
+                },
+            }
+            results.append(lead)
+        return results
+
+    async def enrich_person(
+        self,
+        first_name: str,
+        last_name: str,
+        company_name: str,
+        company_domain: str | None = None,
+        linkedin_url: str | None = None,
+    ) -> dict | None:
+        person = await enrich_person(
+            first_name=first_name,
+            last_name=last_name,
+            organization_name=company_name,
+            domain=company_domain,
+            reveal_email=True,
+        )
+        if person is None:
+            return None
+        email = person.get("email") or person.get("work_email")
+        email_verified = person.get("email_status") == "verified"
+        return {"email": email, "email_verified": email_verified, **person}
+
+    async def get_usage_stats(self) -> dict:
+        raw = await get_api_usage()
+        usage = raw.get("usage") or {}
+        return {
+            "provider_name": "apollo",
+            "credits_used": usage.get("credits_used"),
+            "credits_remaining": usage.get("credits_remaining"),
+        }

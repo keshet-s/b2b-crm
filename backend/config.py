@@ -65,6 +65,17 @@ class Settings(BaseSettings):
     HUNTER_API_KEY: str = ""
     SLACK_WEBHOOK_URL: str = ""
 
+    # --- Data provider selection ---
+    # Switch to "apollo" in .env when upgrading to Apollo Basic plan
+    ACTIVE_LEAD_PROVIDER: str = "pdl"  # Valid values: "pdl", "apollo"
+
+    # --- PeopleDataLabs ---
+    PDL_API_KEY: str = ""
+
+    # --- Credit budgeting (safety caps per sourcing run) ---
+    PDL_MAX_CREDITS_PER_RUN: int = 50       # max PDL credits one sourcing run may consume
+    HUNTER_MAX_SEARCHES_PER_DAY: int = 20   # leave 5/mo buffer on free tier
+
     # --- Database ---
     DATABASE_URL: str = "sqlite:////data/crm.db"
 
