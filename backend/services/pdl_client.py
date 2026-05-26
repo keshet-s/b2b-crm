@@ -63,10 +63,11 @@ def _build_person_es_query(
     must: list = []
 
     if titles:
+        # PDL does not support minimum_should_match; a bool with only should
+        # clauses (no must) defaults to requiring at least one match.
         must.append({
             "bool": {
                 "should": [{"match": {"job_title": t}} for t in titles],
-                "minimum_should_match": 1,
             }
         })
 
@@ -74,7 +75,6 @@ def _build_person_es_query(
         must.append({
             "bool": {
                 "should": [{"term": {"location_country": loc.lower()}} for loc in locations],
-                "minimum_should_match": 1,
             }
         })
 
