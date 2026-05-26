@@ -16,6 +16,50 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://api.peopledatalabs.com/v5"
 _HEADERS = {"X-Api-Key": settings.PDL_API_KEY, "Content-Type": "application/json"}
 
+# ---------------------------------------------------------------------------
+# Title → PDL structured field mappings
+# ---------------------------------------------------------------------------
+
+TITLE_TO_PDL_LEVELS = {
+    "ceo": ["c_suite"],
+    "founder": ["c_suite", "owner"],
+    "co-founder": ["c_suite", "owner"],
+    "managing director": ["c_suite", "director"],
+    "cto": ["c_suite"],
+    "coo": ["c_suite"],
+    "director": ["director"],
+    "training director": ["director"],
+    "head of training": ["director", "manager"],
+    "training manager": ["manager"],
+    "learning and development": ["director", "manager"],
+    "chief training officer": ["c_suite"],
+    "vp training": ["vp"],
+    "vp of learning": ["vp"],
+    "programme director": ["director"],
+    "program director": ["director"],     # US spelling fallback
+}
+
+TITLE_TO_PDL_ROLES = {
+    "training director": ["training", "education"],
+    "head of training": ["training", "education", "hr"],
+    "training manager": ["training", "education", "hr"],
+    "learning and development": ["training", "education", "hr"],
+    "chief training officer": ["training", "education"],
+    "vp training": ["training", "education"],
+    "vp of learning": ["training", "education"],
+    # CEO/Founder/MD at small cybersecurity training companies:
+    # no role filter — level alone is sufficient since
+    # industry filter already scopes to training/security companies
+    "ceo": [],
+    "founder": [],
+    "co-founder": [],
+    "managing director": [],
+    "cto": [],
+    "coo": [],
+    "programme director": ["training", "education", "operations"],
+    "program director": ["training", "education", "operations"],
+}
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -65,34 +109,73 @@ def _build_person_es_query(
     employee_max: int,
     industries: list[str] | None = None,
 ) -> dict:
-    must: list = []
+    must_clauses: list = []
 
     if titles:
-        # PDL does not support minimum_should_match; a bool with only should
-        # clauses (no must) defaults to requiring at least one match.
-        must.append({
-            "bool": {
-                "should": [{"match": {"job_title": t}} for t in titles],
-            }
-        })
+        all_levels: list[str] = []
+        all_roles: list[str] = []
+        unmapped: list[str] = []
+
+        for t in titles:
+            key = t.lower().strip()
+            if key in TITLE_TO_PDL_LEVELS:
+                all_levels.extend(TITLE_TO_PDL_LEVELS[key])
+                all_roles.extend(TITLE_TO_PDL_ROLES.get(key, []))
+            else:
+                unmapped.append(t)
+
+        # Deduplicate while preserving insertion order.
+        all_levels = list(dict.fromkeys(all_levels))
+        all_roles = list(dict.fromkeys(all_roles))
+
+        if all_levels:
+            must_clauses.append({
+                "bool": {
+                    "should": [
+                        {"term": {"job_title_levels": level}}
+                        for level in all_levels
+                    ],
+                    "minimum_should_match": 1
+                }
+            })
+
+        if all_roles:  # only add role filter if roles were resolved
+            must_clauses.append({
+                "bool": {
+                    "should": [
+                        {"term": {"job_title_role": role}}
+                        for role in all_roles
+                    ],
+                    "minimum_should_match": 1
+                }
+            })
+        # if all_roles is empty, industry filter alone scopes the results
+
+        if unmapped:
+            # Fall back to free-text match for titles not in the mapping.
+            must_clauses.append({
+                "bool": {
+                    "should": [{"match": {"job_title": t}} for t in unmapped],
+                }
+            })
 
     if locations:
-        must.append({
+        must_clauses.append({
             "bool": {
                 "should": [{"term": {"location_country": loc.lower()}} for loc in locations],
             }
         })
 
-    must.append({
+    must_clauses.append({
         "range": {
             "job_company_employee_count": {"gte": employee_min, "lte": employee_max}
         }
     })
 
-    must.append({"exists": {"field": "linkedin_url"}})
+    must_clauses.append({"exists": {"field": "linkedin_url"}})
 
     if industries:
-        must.append({
+        must_clauses.append({
             "bool": {
                 "should": [
                     {"match": {"industry": ind.lower().strip()}}
@@ -102,7 +185,7 @@ def _build_person_es_query(
             }
         })
 
-    return {"query": {"bool": {"must": must}}}
+    return {"query": {"bool": {"must": must_clauses}}}
 
 
 # ---------------------------------------------------------------------------
