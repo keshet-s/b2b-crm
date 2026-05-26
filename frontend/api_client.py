@@ -157,3 +157,27 @@ def get_sourcing_runs(limit: int = 10) -> list:
     if isinstance(result, dict) and "error" in result:
         return result
     return result
+
+
+def get_apollo_usage() -> dict:
+    return _get("/api/sourcing/usage")
+
+
+def enrich_tier_a() -> dict:
+    return _post("/api/sourcing/enrich-tier-a")
+
+
+def get_icp_prompt() -> dict:
+    return _get("/api/settings/icp-prompt")
+
+
+def get_icp_config() -> dict:
+    return _get("/api/settings/icp-config")
+
+
+def get_data_health() -> dict:
+    return _get("/api/settings/data-health")
+
+
+def get_api_key_status() -> dict:
+    return _get("/api/settings/api-status")
