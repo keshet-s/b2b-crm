@@ -42,6 +42,7 @@ class LeadProvider(ABC):
         locations: list[str],
         employee_min: int,
         employee_max: int,
+        industries: list[str] | None = None,
         page: int = 1,
         per_page: int = 25,
     ) -> list[dict]:

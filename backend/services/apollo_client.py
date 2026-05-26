@@ -300,9 +300,11 @@ class ApolloProvider:
         locations: list[str],
         employee_min: int,
         employee_max: int,
+        industries: list[str] | None = None,
         page: int = 1,
         per_page: int = 25,
     ) -> list[dict]:
+        # TODO: map industry strings to Apollo industry tag IDs when switching to Apollo provider
         query_params = build_icp_search_params(
             titles=titles,
             locations=locations,

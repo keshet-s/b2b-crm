@@ -28,6 +28,7 @@ class SourcingRunRequest(BaseModel):
     locations: Optional[list[str]] = None
     employee_min: Optional[int] = None
     employee_max: Optional[int] = None
+    industries: Optional[list[str]] = None
     pages: int = 1
 
 
@@ -185,6 +186,7 @@ async def run_sourcing(body: SourcingRunRequest, db: Session = Depends(get_db)):
     locations = body.locations or settings.ICP_LOCATIONS
     employee_min = body.employee_min if body.employee_min is not None else settings.ICP_EMPLOYEE_MIN
     employee_max = body.employee_max if body.employee_max is not None else settings.ICP_EMPLOYEE_MAX
+    industries = body.industries or settings.ICP_INDUSTRIES or None
 
     logger.info("Sourcing run starting with provider: %s", settings.ACTIVE_LEAD_PROVIDER)
 
@@ -232,6 +234,7 @@ async def run_sourcing(body: SourcingRunRequest, db: Session = Depends(get_db)):
                 locations=locations,
                 employee_min=employee_min,
                 employee_max=employee_max,
+                industries=industries,
                 page=page,
                 per_page=25,
             )
