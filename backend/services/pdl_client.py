@@ -187,10 +187,10 @@ class PDLProvider(LeadProvider):
             raise ValueError("es_query must be a dict, not a string — do not call json.dumps() on it")
         payload = {
             "query": es_query,
-            "size": per_page,
-            "from": (page - 1) * per_page,
-            "dataset": "resume,contact,social",
-            "pretty": False,
+            "size": min(per_page, settings.PDL_MAX_CREDITS_PER_RUN),
+            # TODO: implement scroll_token pagination when multi-page runs are needed
+            # First page: no scroll_token
+            # Next page: body["scroll_token"] = previous_response["scroll_token"]
         }
 
         try:
