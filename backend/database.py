@@ -111,6 +111,7 @@ class Lead(Base):
 
     # Provenance
     source: Mapped[str] = mapped_column(String, default="apollo", nullable=False)
+    email_source: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # which waterfall step found the email
 
     # ICP scoring
     icp_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

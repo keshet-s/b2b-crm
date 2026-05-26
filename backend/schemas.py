@@ -68,6 +68,7 @@ class LeadCreate(BaseModel):
     linkedin_url: Optional[str] = None
     email: Optional[str] = None
     email_verified: bool = False
+    email_source: Optional[str] = None  # "hunter_domain"|"pdl_enrich"|"apollo_enrich"|"hunter_finder"
     phone: Optional[str] = None
     company_id: Optional[int] = None
     source: str = "apollo"

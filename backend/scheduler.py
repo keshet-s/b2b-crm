@@ -1,10 +1,10 @@
 """Background job scheduler using APScheduler BackgroundScheduler.
 
 Each job is a plain synchronous function (APScheduler runs them in a
-thread pool). Async service calls (Apollo, Claude, Slack) are executed
-with asyncio.run(), which creates a fresh event loop per invocation.
-Every job opens its own DB session and closes it in a finally block so
-a crashed job never leaks a connection.
+thread pool). Async service calls are executed with asyncio.run(), which
+creates a fresh event loop per invocation. Every job opens its own DB
+session and closes it in a finally block so a crashed job never leaks a
+connection.
 """
 
 import asyncio
@@ -21,8 +21,8 @@ from sqlalchemy import select
 
 from config import settings
 from database import Company, Lead, SourcingRun, SessionLocal
-from services import apollo_client, claude_client, slack_client
-from services.apollo_client import build_icp_search_params, parse_apollo_person
+from services import claude_client, hunter_client, slack_client
+from services.lead_provider import get_lead_provider
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +30,19 @@ _scheduler = BackgroundScheduler(timezone="UTC")
 
 
 # ---------------------------------------------------------------------------
-# Shared DB helpers (mirror of sourcing router upsert logic)
+# Shared DB helpers
 # ---------------------------------------------------------------------------
 
 def _upsert_company(db, company_data: dict) -> Optional[Company]:
-    apollo_id = company_data.get("apollo_id")
+    """Uses provider_id (normalized key) stored in the apollo_id column for dedup."""
+    provider_id = company_data.get("provider_id")
     name = company_data.get("name")
     if not name:
         return None
 
     existing = None
-    if apollo_id:
-        existing = db.scalar(select(Company).where(Company.apollo_id == apollo_id))
+    if provider_id:
+        existing = db.scalar(select(Company).where(Company.apollo_id == provider_id))
 
     if existing:
         existing.name = name
@@ -55,7 +56,7 @@ def _upsert_company(db, company_data: dict) -> Optional[Company]:
         return existing
 
     company = Company(
-        apollo_id=apollo_id,
+        apollo_id=provider_id,
         name=name,
         domain=company_data.get("domain"),
         industry=company_data.get("industry"),
@@ -68,27 +69,27 @@ def _upsert_company(db, company_data: dict) -> Optional[Company]:
     return company
 
 
-def _upsert_lead(db, parsed: dict, company_id: Optional[int]) -> tuple[Lead, bool]:
-    apollo_id = parsed.get("apollo_id")
-    if apollo_id:
-        existing = db.scalar(select(Lead).where(Lead.apollo_id == apollo_id))
+def _upsert_lead(db, result: dict, company_id: Optional[int]) -> tuple[Lead, bool]:
+    provider_id = result.get("provider_id")
+    if provider_id:
+        existing = db.scalar(select(Lead).where(Lead.apollo_id == provider_id))
         if existing:
             return existing, False
 
     lead = Lead(
-        apollo_id=apollo_id,
-        first_name=parsed.get("first_name"),
-        last_name=parsed.get("last_name"),
-        full_name=parsed.get("full_name"),
-        title=parsed.get("title"),
-        seniority=parsed.get("seniority"),
-        department=parsed.get("department"),
-        linkedin_url=parsed.get("linkedin_url"),
-        email=parsed.get("email"),
-        email_verified=parsed.get("email_verified", False),
-        phone=parsed.get("phone"),
+        apollo_id=provider_id,
+        first_name=result.get("first_name"),
+        last_name=result.get("last_name"),
+        full_name=result.get("full_name"),
+        title=result.get("title"),
+        seniority=result.get("seniority"),
+        department=result.get("department"),
+        linkedin_url=result.get("linkedin_url"),
+        email=result.get("email"),
+        email_verified=result.get("email_verified", False),
+        phone=result.get("phone"),
         company_id=company_id,
-        source="apollo",
+        source=result.get("source", settings.ACTIVE_LEAD_PROVIDER),
         status="identified",
     )
     db.add(lead)
@@ -110,15 +111,16 @@ def daily_sourcing_job() -> None:
             batch = titles[offset : offset + batch_size]
             titles = batch if batch else titles[:batch_size]
 
-        query_params = build_icp_search_params(
-            titles=titles,
-            locations=settings.ICP_LOCATIONS,
-            employee_min=settings.ICP_EMPLOYEE_MIN,
-            employee_max=settings.ICP_EMPLOYEE_MAX,
-        )
+        query_params_summary = {
+            "provider": settings.ACTIVE_LEAD_PROVIDER,
+            "titles": titles,
+            "locations": settings.ICP_LOCATIONS,
+            "employee_min": settings.ICP_EMPLOYEE_MIN,
+            "employee_max": settings.ICP_EMPLOYEE_MAX,
+        }
 
         db = SessionLocal()
-        run = SourcingRun(status="running", query_params=json.dumps(query_params))
+        run = SourcingRun(status="running", query_params=json.dumps(query_params_summary))
         db.add(run)
         db.commit()
         db.refresh(run)
@@ -127,15 +129,21 @@ def daily_sourcing_job() -> None:
         leads_new = 0
 
         try:
-            response = asyncio.run(
-                apollo_client.search_people(query_params, page=1, per_page=100)
+            provider = get_lead_provider()
+            results = asyncio.run(
+                provider.search_people(
+                    titles=titles,
+                    locations=settings.ICP_LOCATIONS,
+                    employee_min=settings.ICP_EMPLOYEE_MIN,
+                    employee_max=settings.ICP_EMPLOYEE_MAX,
+                    page=1,
+                    per_page=25,
+                )
             )
-            people = response.get("people") or []
 
-            for raw_person in people:
-                parsed = parse_apollo_person(raw_person)
-                company = _upsert_company(db, parsed["company"])
-                _, is_new = _upsert_lead(db, parsed, company.id if company else None)
+            for result in results:
+                company = _upsert_company(db, result["company"])
+                _, is_new = _upsert_lead(db, result, company.id if company else None)
                 leads_found += 1
                 if is_new:
                     leads_new += 1
@@ -146,7 +154,12 @@ def daily_sourcing_job() -> None:
             run.leads_new = leads_new
             run.completed_at = datetime.utcnow()
             db.commit()
-            logger.info("Daily sourcing: found %d, new %d", leads_found, leads_new)
+            logger.info(
+                "Daily sourcing (%s): found %d, new %d",
+                settings.ACTIVE_LEAD_PROVIDER,
+                leads_found,
+                leads_new,
+            )
 
         except Exception:
             db.rollback()
@@ -310,21 +323,22 @@ def weekly_reenrichment_job() -> None:
                 return
 
             async def _enrich_batch(batch):
+                provider = get_lead_provider()
                 results = []
                 for lead in batch:
                     company = db.get(Company, lead.company_id) if lead.company_id else None
                     try:
-                        person = await apollo_client.enrich_person(
+                        result = await provider.enrich_person(
                             first_name=lead.first_name or "",
                             last_name=lead.last_name or "",
-                            organization_name=company.name if company else "",
-                            domain=company.domain if company else None,
-                            reveal_email=True,
+                            company_name=company.name if company else "",
+                            company_domain=company.domain if company else None,
+                            linkedin_url=lead.linkedin_url,
                         )
-                        results.append((lead, person))
+                        results.append((lead, result))
                     except Exception:
                         logger.warning(
-                            "Re-enrichment: Apollo call failed for lead %d",
+                            "Re-enrichment: provider call failed for lead %d",
                             lead.id,
                             exc_info=True,
                         )
@@ -334,16 +348,15 @@ def weekly_reenrichment_job() -> None:
             enrichment_results = asyncio.run(_enrich_batch(leads))
 
             enriched_count = 0
-            for lead, person in enrichment_results:
-                if not person:
+            for lead, result in enrichment_results:
+                if not result or not result.get("email"):
                     continue
-                email = person.get("email") or person.get("work_email")
-                if email:
-                    lead.email = email
-                    lead.email_verified = person.get("email_status") == "verified"
-                    lead.enriched_at = datetime.utcnow()
-                    lead.updated_at = datetime.utcnow()
-                    enriched_count += 1
+                lead.email = result["email"]
+                lead.email_verified = result.get("email_verified", False)
+                lead.email_source = f"{settings.ACTIVE_LEAD_PROVIDER}_enrich"
+                lead.enriched_at = datetime.utcnow()
+                lead.updated_at = datetime.utcnow()
+                enriched_count += 1
 
             db.commit()
             logger.info(
@@ -360,15 +373,62 @@ def weekly_reenrichment_job() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Job 6: Weekly API budget summary — Monday 08:30 UTC
+# ---------------------------------------------------------------------------
+
+def log_credit_usage_job() -> None:
+    try:
+        provider = get_lead_provider()
+        provider_stats = asyncio.run(provider.get_usage_stats())
+        hunter_stats = asyncio.run(hunter_client.get_usage())
+
+        hunter_requests = hunter_stats.get("requests") or {}
+        logger.info(
+            "Weekly API budget — provider=%s credits_used=%s credits_remaining=%s | "
+            "Hunter searches used=%s available=%s",
+            provider_stats.get("provider_name"),
+            provider_stats.get("credits_used"),
+            provider_stats.get("credits_remaining"),
+            hunter_requests.get("used"),
+            hunter_requests.get("available"),
+        )
+
+        if not settings.SLACK_WEBHOOK_URL:
+            return
+
+        note = provider_stats.get("note", "")
+        msg_lines = [
+            "*Weekly API Budget Summary*",
+            (
+                f"• Provider: *{provider_stats.get('provider_name')}* — "
+                f"credits used: {provider_stats.get('credits_used', 'N/A')}, "
+                f"remaining: {provider_stats.get('credits_remaining', 'N/A')}"
+            ),
+        ]
+        if note:
+            msg_lines.append(f"  _{note}_")
+        msg_lines.append(
+            f"• Hunter.io — searches used: {hunter_requests.get('used', 'N/A')}, "
+            f"available: {hunter_requests.get('available', 'N/A')}"
+        )
+
+        asyncio.run(slack_client.send_pipeline_alert("\n".join(msg_lines)))
+
+    except Exception:
+        logger.exception("log_credit_usage_job failed")
+
+
+# ---------------------------------------------------------------------------
 # Job registry (used for manual trigger endpoint)
 # ---------------------------------------------------------------------------
 
 _JOB_MAP: dict[str, object] = {
-    "daily_sourcing_job":    daily_sourcing_job,
-    "daily_scoring_job":     daily_scoring_job,
-    "daily_slack_digest":    daily_slack_digest,
-    "followup_reminder_job": followup_reminder_job,
+    "daily_sourcing_job":      daily_sourcing_job,
+    "daily_scoring_job":       daily_scoring_job,
+    "daily_slack_digest":      daily_slack_digest,
+    "followup_reminder_job":   followup_reminder_job,
     "weekly_reenrichment_job": weekly_reenrichment_job,
+    "log_credit_usage_job":    log_credit_usage_job,
 }
 
 
@@ -406,6 +466,12 @@ def start() -> None:
         weekly_reenrichment_job,
         CronTrigger(day_of_week="sun", hour=10, minute=0, timezone="UTC"),
         id="weekly_reenrichment_job",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        log_credit_usage_job,
+        CronTrigger(day_of_week="mon", hour=8, minute=30, timezone="UTC"),
+        id="log_credit_usage_job",
         replace_existing=True,
     )
     _scheduler.start()
