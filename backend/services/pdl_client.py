@@ -4,7 +4,6 @@ Implements PDLProvider(LeadProvider) for people search and enrichment.
 Base URL: https://api.peopledatalabs.com/v5
 """
 
-import json
 import logging
 
 import httpx
@@ -115,8 +114,12 @@ async def search_companies(
         {"range": {"employee_count": {"gte": employee_min, "lte": employee_max}}},
         {"term": {"location_country": country.lower()}},
     ]
+    es_query = {"query": {"bool": {"must": must}}}
+    if not isinstance(es_query, dict):
+        logger.error("es_query must be a dict, not a string — do not call json.dumps() on it")
+        raise ValueError("es_query must be a dict, not a string — do not call json.dumps() on it")
     payload = {
-        "query": json.dumps({"query": {"bool": {"must": must}}}),
+        "query": es_query,
         "size": size,
         "pretty": False,
     }
@@ -179,8 +182,11 @@ class PDLProvider(LeadProvider):
             per_page = cap
 
         es_query = _build_person_es_query(titles, locations, employee_min, employee_max)
+        if not isinstance(es_query, dict):
+            logger.error("es_query must be a dict, not a string — do not call json.dumps() on it")
+            raise ValueError("es_query must be a dict, not a string — do not call json.dumps() on it")
         payload = {
-            "query": json.dumps(es_query),
+            "query": es_query,
             "size": per_page,
             "from": (page - 1) * per_page,
             "dataset": "resume,contact,social",
