@@ -145,12 +145,12 @@ class SourcingRunResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ICPScoreResult(BaseModel):
-    score: int                          # 0–100
-    tier: str                           # 'A', 'B', 'C', 'D'
-    fit_reasoning: str
+    score: int                              # 0–100
+    tier: str                               # 'A', 'B', 'C', 'D'
+    fit_reasoning: str | None = None
     disqualifiers: list[str] = []
-    next_action: str
-    personalized_hook: str
+    next_action: str | None = None
+    personalized_hook: str | None = None
 
 
 # ---------------------------------------------------------------------------
