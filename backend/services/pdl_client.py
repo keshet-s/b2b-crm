@@ -63,6 +63,7 @@ def _build_person_es_query(
     locations: list[str],
     employee_min: int,
     employee_max: int,
+    industries: list[str] | None = None,
 ) -> dict:
     must: list = []
 
@@ -89,6 +90,17 @@ def _build_person_es_query(
     })
 
     must.append({"exists": {"field": "linkedin_url"}})
+
+    if industries:
+        must.append({
+            "bool": {
+                "should": [
+                    {"match": {"industry": ind.lower().strip()}}
+                    for ind in industries
+                ],
+                "minimum_should_match": 1
+            }
+        })
 
     return {"query": {"bool": {"must": must}}}
 
@@ -171,6 +183,7 @@ class PDLProvider(LeadProvider):
         locations: list[str],
         employee_min: int,
         employee_max: int,
+        industries: list[str] | None = None,
         page: int = 1,
         per_page: int = 25,
     ) -> list[dict]:
@@ -185,7 +198,7 @@ class PDLProvider(LeadProvider):
             )
             per_page = cap
 
-        es_query = _build_person_es_query(titles, locations, employee_min, employee_max)
+        es_query = _build_person_es_query(titles, locations, employee_min, employee_max, industries)
         if not isinstance(es_query, dict):
             logger.error("es_query must be a dict, not a string — do not call json.dumps() on it")
             raise ValueError("es_query must be a dict, not a string — do not call json.dumps() on it")

@@ -136,6 +136,7 @@ def daily_sourcing_job() -> None:
                     locations=settings.ICP_LOCATIONS,
                     employee_min=settings.ICP_EMPLOYEE_MIN,
                     employee_max=settings.ICP_EMPLOYEE_MAX,
+                    industries=settings.ICP_INDUSTRIES or None,
                     page=1,
                     per_page=25,
                 )
