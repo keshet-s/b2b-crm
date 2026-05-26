@@ -22,9 +22,13 @@ _HEADERS = {"X-Api-Key": settings.PDL_API_KEY, "Content-Type": "application/json
 # ---------------------------------------------------------------------------
 
 def _parse_pdl_person(raw: dict) -> dict:
-    work_emails: list = raw.get("work_email") or []
+    # PDL free tier returns True (bool) when an email exists but isn't revealed.
+    # Only treat actual strings/lists as usable email data.
+    work_emails = raw.get("work_email")
     if isinstance(work_emails, str):
         work_emails = [work_emails]
+    elif not isinstance(work_emails, list):
+        work_emails = []
     email = work_emails[0] if work_emails else None
 
     levels: list = raw.get("job_title_levels") or []
@@ -247,9 +251,11 @@ class PDLProvider(LeadProvider):
                 )
                 return None
             data = response.json()
-            work_emails: list = data.get("work_email") or []
+            work_emails = data.get("work_email")
             if isinstance(work_emails, str):
                 work_emails = [work_emails]
+            elif not isinstance(work_emails, list):
+                work_emails = []
             email = work_emails[0] if work_emails else None
             if not email:
                 return None
