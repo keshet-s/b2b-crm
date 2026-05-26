@@ -194,6 +194,26 @@ def get_db():
 # Table creation
 # ---------------------------------------------------------------------------
 
+import logging as _logging
+_db_logger = _logging.getLogger(__name__)
+
+
+def _migrate_columns() -> None:
+    """Add columns introduced after the initial schema was created.
+
+    SQLAlchemy's create_all() never alters existing tables, so new columns
+    must be applied here. Each ALTER TABLE is guarded by a PRAGMA check so
+    the migration is safe to run on every startup.
+    """
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(leads)"))}
+        if "email_source" not in existing:
+            conn.execute(text("ALTER TABLE leads ADD COLUMN email_source VARCHAR"))
+            conn.commit()
+            _db_logger.info("Migration: added email_source column to leads")
+
+
 def init_db() -> None:
-    """Create all tables. Safe to call on every startup (no-op if tables exist)."""
+    """Create all tables and apply pending column migrations on every startup."""
     Base.metadata.create_all(bind=engine)
+    _migrate_columns()
