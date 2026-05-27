@@ -30,6 +30,7 @@ class SourcingRunRequest(BaseModel):
     employee_max: Optional[int] = None
     industries: Optional[list[str]] = None
     pages: int = 1
+    per_page: int = 25
 
 
 class BulkEnrichResponse(BaseModel):
@@ -193,7 +194,7 @@ async def run_sourcing(body: SourcingRunRequest, db: Session = Depends(get_db)):
     # Credit guard for PDL: reject before creating the run record.
     if settings.ACTIVE_LEAD_PROVIDER == "pdl":
         from services.pdl_client import estimate_credits_for_run
-        estimated = estimate_credits_for_run(per_page=25, pages=body.pages)
+        estimated = estimate_credits_for_run(per_page=body.per_page, pages=body.pages)
         logger.info("Estimated PDL credits for this run: %d", estimated)
         if estimated > settings.PDL_MAX_CREDITS_PER_RUN:
             raise HTTPException(
@@ -236,7 +237,7 @@ async def run_sourcing(body: SourcingRunRequest, db: Session = Depends(get_db)):
                 employee_max=employee_max,
                 industries=industries,
                 page=page,
-                per_page=25,
+                per_page=body.per_page,
             )
 
             if not results:
