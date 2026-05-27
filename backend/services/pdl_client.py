@@ -135,7 +135,6 @@ def _build_person_es_query(
                         {"term": {"job_title_levels": level}}
                         for level in all_levels
                     ],
-                    "minimum_should_match": 1
                 }
             })
 
@@ -146,7 +145,6 @@ def _build_person_es_query(
                         {"term": {"job_title_role": role}}
                         for role in all_roles
                     ],
-                    "minimum_should_match": 1
                 }
             })
         # if all_roles is empty, industry filter alone scopes the results
@@ -181,7 +179,6 @@ def _build_person_es_query(
                     {"match": {"industry": ind.lower().strip()}}
                     for ind in industries
                 ],
-                "minimum_should_match": 1
             }
         })
 
